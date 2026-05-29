@@ -1,0 +1,59 @@
+model:
+  id: google/gemma-4-E4B-it
+  dtype: bfloat16
+  device: mps
+  attn_implementation: eager
+  drop_multimodal_towers: true
+prompt:
+  enable_thinking: false
+  answer_instruction: ' Answer concisely with just the answer.'
+recall_band:
+  lo_frac: 0.35
+  hi_frac: 0.75
+features:
+  last_content_tokens: 4
+  eps: 1.0e-06
+signals:
+  a: true
+  b: true
+  c: false
+  d: false
+  c_sigma: 0.1
+  c_k: 4
+  d_layer_frac: 0.6
+generation:
+  max_new_tokens: 32
+  greedy: true
+  consistency_samples: 0
+  consistency_temperature: 0.7
+  stop_token_ids:
+  - 1
+  - 106
+dataset:
+  datasets:
+  - popqa
+  - triviaqa
+  target_total: 3000
+  seed: 17
+  val_frac: 0.15
+  test_frac: 0.15
+train:
+  seed: 17
+  epochs: 120
+  patience: 20
+  lr: 0.001
+  weight_decay: 0.0001
+  hidden: 96
+  batch_size: 128
+  device: mps
+thresholds:
+  green: 0.8650747537612915
+  red: 0.7741634845733643
+paths:
+  data_dir: data
+  ckpt_dir: ckpts
+  fig_dir: data/figs
+  dataset_parquet: data/dataset.parquet
+  feats_npz: data/feats.npz
+  splits_json: data/splits.json
+  metrics_json: data/metrics.json
