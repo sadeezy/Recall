@@ -147,25 +147,16 @@ def _match_md(ans, gold):
     return ""
 
 
-def _seed_thought_for(p, threshold):
-    """Deterministic CoT seed. Below ``threshold`` -> admit low confidence; at/above -> None
-    (no seed, normal generation). Never mentions the probe or the number."""
-    if p < threshold:
-        return ("I don't think I have enough reliable knowledge in this area to answer the user "
-                "confidently. I should be honest about that uncertainty rather than guess.")
-    return None
-
-
-def _seed_thought_pct(p):
-    """Method-2 CoT seed: state the calibrated P(knows) as a percent *and* spell out the
-    behavioral consequence (no threshold gating). A bare probability gets ignored — the model
-    only acts on it if the seed explicitly tells it what to do, graded by how low/high p is."""
+def _seed_thought_pct(p, low, high):
+    """Thought-seed CoT: state the calibrated P(knows) as a percent *and* spell out the
+    behavioral consequence. A bare probability gets ignored — the model only acts on it if the
+    seed explicitly tells it what to do, graded into low/moderate/high bands by ``low``/``high``."""
     pct = f"{p:.0%}"
-    if p < 0.4:
+    if p < low:
         directive = ("That is low: I most likely do not actually know this, so I must not guess "
                      "or state an answer as if it were fact. I will tell the user plainly that I'm "
                      "not confident here and may well be wrong, or that I don't know.")
-    elif p < 0.7:
+    elif p < high:
         directive = ("That is only moderate, not high enough to answer as if I'm sure. I must not "
                      "state my answer as plain fact. I will first tell the user explicitly that I'm "
                      "uncertain and could be wrong — leading with a hedge like \"I'm not certain, but "
@@ -189,31 +180,13 @@ def generate_answer(question, gold, temperature):
     return f"Model answer: {ans!r}" + _match_md(ans, gold)
 
 
-def generate_thought_method(question, gold, temperature, threshold):
+def generate_thought_seed(question, gold, temperature, low, high):
     if not question or not question.strip():
         return "Enter a question first."
     p = _pknows(question)
     if p is None:
         return "Sidecar not trained yet — run `python -m kbe.sidecar` first."
-    seed = _seed_thought_for(p, threshold)
-    if seed is None:
-        ans = ENG.generate_answer(question, **_gen_kwargs(temperature))
-        note = f"P(knows) ≥ threshold ({threshold:.3f}) → no seed (normal generation)."
-    else:
-        ans = ENG.generate_answer_seeded(question, seed, **_gen_kwargs(temperature))
-        note = f"P(knows) < threshold ({threshold:.3f}) → seeded thought: {seed!r}"
-    out = f"**Calibrated P(knows) = {p:.3f}** → {note}\n\n"
-    out += f"Model answer: {ans!r}" + _match_md(ans, gold)
-    return out
-
-
-def generate_thought_method_2(question, gold, temperature):
-    if not question or not question.strip():
-        return "Enter a question first."
-    p = _pknows(question)
-    if p is None:
-        return "Sidecar not trained yet — run `python -m kbe.sidecar` first."
-    seed = _seed_thought_pct(p)
+    seed = _seed_thought_pct(p, low, high)
     ans = ENG.generate_answer_seeded(question, seed, **_gen_kwargs(temperature))
     out = f"**Calibrated P(knows) = {p:.3f}** → always-seeded (percent template): {seed!r}\n\n"
     out += f"Model answer: {ans!r}" + _match_md(ans, gold)
@@ -278,18 +251,18 @@ def build_ui():
             gold = gr.Textbox(label="Optional gold answer(s), pipe-separated", placeholder="Jane Austen | Austen")
             with gr.Row():
                 temp = gr.Slider(0.0, 2.0, value=0.0, step=0.05, label="Temperature (0 = greedy)")
-                thr = gr.Slider(0.0, 1.0, value=RED if RED is not None else 0.5, step=0.01,
-                                label="Uncertain threshold (thought method)")
+                band_lo = gr.Slider(0.0, 1.0, value=0.4, step=0.01,
+                                    label="Low band cutoff (below = admit unsure)")
+                band_hi = gr.Slider(0.0, 1.0, value=0.7, step=0.01,
+                                    label="High band cutoff (above = answer confidently)")
             with gr.Row():
                 gen_btn = gr.Button("Generate - baseline", variant="primary")
-                gen_thought_btn = gr.Button("Generate - thought method")
-                gen_thought2_btn = gr.Button("Generate - thought method 2")
+                gen_seed_btn = gr.Button("Generate - thought seed")
             gen_out = gr.Markdown()
 
             btn.click(probe, inputs=q, outputs=[gauge, cryst, mlp, forming, verdict])
             gen_btn.click(generate_answer, inputs=[q, gold, temp], outputs=gen_out)
-            gen_thought_btn.click(generate_thought_method, inputs=[q, gold, temp, thr], outputs=gen_out)
-            gen_thought2_btn.click(generate_thought_method_2, inputs=[q, gold, temp], outputs=gen_out)
+            gen_seed_btn.click(generate_thought_seed, inputs=[q, gold, temp, band_lo, band_hi], outputs=gen_out)
         with gr.Tab("Evaluation"):
             md, test_img, cross_img = _load_metrics_md()
             gr.Markdown(md)
