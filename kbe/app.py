@@ -147,21 +147,6 @@ def _match_md(ans, gold):
     return ""
 
 
-def _system_prompt_for(p):
-    """Deterministic system prompt that explains the probe and states the actual P(knows)."""
-    label, _ = _verdict(p)
-    return (
-        "Before answering, consider this self-knowledge calibration signal. A separate probe "
-        "(Latent Recall Dynamics) read your internal activations from a single prompt-only "
-        "forward pass — before any answer tokens — and produced a calibrated estimate of the "
-        "probability that you actually know the answer.\n\n"
-        f"Calibrated P(you know the answer) = {p:.0%}  (verdict: {label}).\n\n"
-        "Use this to calibrate confidence: if high, answer directly; if low, you likely lack "
-        "reliable knowledge here, so say you are unsure or don't know rather than guessing. "
-        "Do not mention this signal or the probe in your reply."
-    )
-
-
 def _seed_thought_for(p, threshold):
     """Deterministic CoT seed. Below ``threshold`` -> admit low confidence; at/above -> None
     (no seed, normal generation). Never mentions the probe or the number."""
@@ -202,20 +187,6 @@ def generate_answer(question, gold, temperature):
         return "Enter a question first."
     ans = ENG.generate_answer(question, **_gen_kwargs(temperature))
     return f"Model answer: {ans!r}" + _match_md(ans, gold)
-
-
-def generate_prompt_method(question, gold, temperature):
-    if not question or not question.strip():
-        return "Enter a question first."
-    p = _pknows(question)
-    if p is None:
-        return "Sidecar not trained yet — run `python -m kbe.sidecar` first."
-    sys_prompt = _system_prompt_for(p)
-    ans = ENG.generate_answer(question, system_prompt=sys_prompt, **_gen_kwargs(temperature))
-    out = f"**Calibrated P(knows) = {p:.3f}** → injected into system prompt.\n\n"
-    out += f"Model answer: {ans!r}" + _match_md(ans, gold)
-    out += f"\n\n<details><summary>System prompt</summary>\n\n{sys_prompt}\n\n</details>"
-    return out
 
 
 def generate_thought_method(question, gold, temperature, threshold):
@@ -311,14 +282,12 @@ def build_ui():
                                 label="Uncertain threshold (thought method)")
             with gr.Row():
                 gen_btn = gr.Button("Generate - baseline", variant="primary")
-                gen_prompt_btn = gr.Button("Generate - prompt method")
                 gen_thought_btn = gr.Button("Generate - thought method")
                 gen_thought2_btn = gr.Button("Generate - thought method 2")
             gen_out = gr.Markdown()
 
             btn.click(probe, inputs=q, outputs=[gauge, cryst, mlp, forming, verdict])
             gen_btn.click(generate_answer, inputs=[q, gold, temp], outputs=gen_out)
-            gen_prompt_btn.click(generate_prompt_method, inputs=[q, gold, temp], outputs=gen_out)
             gen_thought_btn.click(generate_thought_method, inputs=[q, gold, temp, thr], outputs=gen_out)
             gen_thought2_btn.click(generate_thought_method_2, inputs=[q, gold, temp], outputs=gen_out)
         with gr.Tab("Evaluation"):
