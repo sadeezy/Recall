@@ -167,27 +167,21 @@ def _seed_thought_pct(p, low, high):
             f"the answer to this question. {directive}")
 
 
-def _gen_kwargs(temperature):
-    """Map the GUI temperature to generation kwargs: 0 -> greedy, >0 -> sampling at that temp."""
-    t = float(temperature or 0.0)
-    return {"do_sample": t > 0, "temperature": t} if t > 0 else {"do_sample": False}
-
-
-def generate_answer(question, gold, temperature):
+def generate_answer(question, gold):
     if not question or not question.strip():
         return "Enter a question first."
-    ans = ENG.generate_answer(question, **_gen_kwargs(temperature))
+    ans = ENG.generate_answer(question)
     return f"Model answer: {ans!r}" + _match_md(ans, gold)
 
 
-def generate_thought_seed(question, gold, temperature, low, high):
+def generate_thought_seed(question, gold, low, high):
     if not question or not question.strip():
         return "Enter a question first."
     p = _pknows(question)
     if p is None:
         return "Sidecar not trained yet — run `python -m kbe.sidecar` first."
     seed = _seed_thought_pct(p, low, high)
-    ans = ENG.generate_answer_seeded(question, seed, **_gen_kwargs(temperature))
+    ans = ENG.generate_answer_seeded(question, seed)
     out = f"**Calibrated P(knows) = {p:.3f}** → always-seeded (percent template): {seed!r}\n\n"
     out += f"Model answer: {ans!r}" + _match_md(ans, gold)
     return out
@@ -250,19 +244,19 @@ def build_ui():
             gr.Markdown("### Verify")
             gold = gr.Textbox(label="Optional gold answer(s), pipe-separated", placeholder="Jane Austen | Austen")
             with gr.Row():
-                temp = gr.Slider(0.0, 2.0, value=0.0, step=0.05, label="Temperature (0 = greedy)")
-                band_lo = gr.Slider(0.0, 1.0, value=0.4, step=0.01,
-                                    label="Low band cutoff (below = admit unsure)")
-                band_hi = gr.Slider(0.0, 1.0, value=0.7, step=0.01,
-                                    label="High band cutoff (above = answer confidently)")
-            with gr.Row():
-                gen_btn = gr.Button("Generate - baseline", variant="primary")
-                gen_seed_btn = gr.Button("Generate - thought seed")
+                with gr.Column():
+                    gen_btn = gr.Button("Generate - baseline", variant="primary")
+                with gr.Column():
+                    band_lo = gr.Slider(0.0, 1.0, value=0.4, step=0.01,
+                                        label="Low band cutoff (below = admit unsure)")
+                    band_hi = gr.Slider(0.0, 1.0, value=0.7, step=0.01,
+                                        label="High band cutoff (above = answer confidently)")
+                    gen_seed_btn = gr.Button("Generate - thought seed")
             gen_out = gr.Markdown()
 
             btn.click(probe, inputs=q, outputs=[gauge, cryst, mlp, forming, verdict])
-            gen_btn.click(generate_answer, inputs=[q, gold, temp], outputs=gen_out)
-            gen_seed_btn.click(generate_thought_seed, inputs=[q, gold, temp, band_lo, band_hi], outputs=gen_out)
+            gen_btn.click(generate_answer, inputs=[q, gold], outputs=gen_out)
+            gen_seed_btn.click(generate_thought_seed, inputs=[q, gold, band_lo, band_hi], outputs=gen_out)
         with gr.Tab("Evaluation"):
             md, test_img, cross_img = _load_metrics_md()
             gr.Markdown(md)
