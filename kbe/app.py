@@ -171,6 +171,26 @@ def _seed_thought_for(p, threshold):
     return None
 
 
+def _seed_thought_pct(p):
+    """Method-2 CoT seed: state the calibrated P(knows) as a percent *and* spell out the
+    behavioral consequence (no threshold gating). A bare probability gets ignored — the model
+    only acts on it if the seed explicitly tells it what to do, graded by how low/high p is."""
+    pct = f"{p:.0%}"
+    if p < 0.4:
+        directive = ("That is low: I most likely do not actually know this, so I must not guess "
+                     "or state an answer as if it were fact. I will tell the user plainly that I'm "
+                     "not confident here and may well be wrong, or that I don't know.")
+    elif p < 0.7:
+        directive = ("That is only moderate, not high enough to answer as if I'm sure. I must not "
+                     "state my answer as plain fact. I will first tell the user explicitly that I'm "
+                     "uncertain and could be wrong — leading with a hedge like \"I'm not certain, but "
+                     "I think\" — and only then give my best attempt.")
+    else:
+        directive = "That is high: I likely do know this, so I can answer directly and confidently."
+    return (f"A probe of my own internal knowledge estimates a {pct} chance that I actually know "
+            f"the answer to this question. {directive}")
+
+
 def _gen_kwargs(temperature):
     """Map the GUI temperature to generation kwargs: 0 -> greedy, >0 -> sampling at that temp."""
     t = float(temperature or 0.0)
@@ -212,6 +232,19 @@ def generate_thought_method(question, gold, temperature, threshold):
         ans = ENG.generate_answer_seeded(question, seed, **_gen_kwargs(temperature))
         note = f"P(knows) < threshold ({threshold:.3f}) → seeded thought: {seed!r}"
     out = f"**Calibrated P(knows) = {p:.3f}** → {note}\n\n"
+    out += f"Model answer: {ans!r}" + _match_md(ans, gold)
+    return out
+
+
+def generate_thought_method_2(question, gold, temperature):
+    if not question or not question.strip():
+        return "Enter a question first."
+    p = _pknows(question)
+    if p is None:
+        return "Sidecar not trained yet — run `python -m kbe.sidecar` first."
+    seed = _seed_thought_pct(p)
+    ans = ENG.generate_answer_seeded(question, seed, **_gen_kwargs(temperature))
+    out = f"**Calibrated P(knows) = {p:.3f}** → always-seeded (percent template): {seed!r}\n\n"
     out += f"Model answer: {ans!r}" + _match_md(ans, gold)
     return out
 
@@ -280,12 +313,14 @@ def build_ui():
                 gen_btn = gr.Button("Generate - baseline", variant="primary")
                 gen_prompt_btn = gr.Button("Generate - prompt method")
                 gen_thought_btn = gr.Button("Generate - thought method")
+                gen_thought2_btn = gr.Button("Generate - thought method 2")
             gen_out = gr.Markdown()
 
             btn.click(probe, inputs=q, outputs=[gauge, cryst, mlp, forming, verdict])
             gen_btn.click(generate_answer, inputs=[q, gold, temp], outputs=gen_out)
             gen_prompt_btn.click(generate_prompt_method, inputs=[q, gold, temp], outputs=gen_out)
             gen_thought_btn.click(generate_thought_method, inputs=[q, gold, temp, thr], outputs=gen_out)
+            gen_thought2_btn.click(generate_thought_method_2, inputs=[q, gold, temp], outputs=gen_out)
         with gr.Tab("Evaluation"):
             md, test_img, cross_img = _load_metrics_md()
             gr.Markdown(md)
