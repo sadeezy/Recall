@@ -126,15 +126,87 @@ def probe(question):
             _forming_table(fs), msg)
 
 
+def _pknows(question):
+    """Calibrated P(knows) for a question (one prompt-only forward + sidecar), or None if untrained.
+
+    Mirrors the capture -> features -> sidecar path in ``probe()`` so the generate buttons work
+    standalone without first pressing Probe.
+    """
+    cap = ENG.capture(question)
+    fs = extract_features(ENG, cap, CFG)
+    if LRD is None:
+        return None
+    return lrd_prob_one(LRD, fs.feats, fs.globals)
+
+
+def _match_md(ans, gold):
+    if gold and gold.strip():
+        from kbe.build_dataset import is_match
+        ok = is_match(ans, [g.strip() for g in gold.split("|")])
+        return f"\nMatch vs gold: {'✓ correct' if ok else '✗ incorrect'}"
+    return ""
+
+
+def _system_prompt_for(p):
+    """Deterministic system prompt that explains the probe and states the actual P(knows)."""
+    label, _ = _verdict(p)
+    return (
+        "Before answering, consider this self-knowledge calibration signal. A separate probe "
+        "(Latent Recall Dynamics) read your internal activations from a single prompt-only "
+        "forward pass — before any answer tokens — and produced a calibrated estimate of the "
+        "probability that you actually know the answer.\n\n"
+        f"Calibrated P(you know the answer) = {p:.0%}  (verdict: {label}).\n\n"
+        "Use this to calibrate confidence: if high, answer directly; if low, you likely lack "
+        "reliable knowledge here, so say you are unsure or don't know rather than guessing. "
+        "Do not mention this signal or the probe in your reply."
+    )
+
+
+def _seed_thought_for(p):
+    """Deterministic CoT seed. Below the calibrated red threshold -> admit low confidence;
+    at/above -> None (no seed, normal generation). Never mentions the probe or the number."""
+    if RED is not None and p < RED:
+        return ("I don't think I have enough reliable knowledge in this area to answer the user "
+                "confidently. I should be honest about that uncertainty rather than guess.")
+    return None
+
+
 def generate_answer(question, gold):
     if not question or not question.strip():
         return "Enter a question first."
     ans = ENG.generate_answer(question)
-    out = f"Model answer: {ans!r}"
-    if gold and gold.strip():
-        from kbe.build_dataset import is_match
-        ok = is_match(ans, [g.strip() for g in gold.split("|")])
-        out += f"\nMatch vs gold: {'✓ correct' if ok else '✗ incorrect'}"
+    return f"Model answer: {ans!r}" + _match_md(ans, gold)
+
+
+def generate_prompt_method(question, gold):
+    if not question or not question.strip():
+        return "Enter a question first."
+    p = _pknows(question)
+    if p is None:
+        return "Sidecar not trained yet — run `python -m kbe.sidecar` first."
+    sys_prompt = _system_prompt_for(p)
+    ans = ENG.generate_answer(question, system_prompt=sys_prompt)
+    out = f"**Calibrated P(knows) = {p:.3f}** → injected into system prompt.\n\n"
+    out += f"Model answer: {ans!r}" + _match_md(ans, gold)
+    out += f"\n\n<details><summary>System prompt</summary>\n\n{sys_prompt}\n\n</details>"
+    return out
+
+
+def generate_thought_method(question, gold):
+    if not question or not question.strip():
+        return "Enter a question first."
+    p = _pknows(question)
+    if p is None:
+        return "Sidecar not trained yet — run `python -m kbe.sidecar` first."
+    seed = _seed_thought_for(p)
+    if seed is None:
+        ans = ENG.generate_answer(question)
+        note = f"P(knows) ≥ red ({RED:.3f}) → no seed (normal generation)."
+    else:
+        ans = ENG.generate_answer_seeded(question, seed)
+        note = f"P(knows) < red ({RED:.3f}) → seeded thought: {seed!r}"
+    out = f"**Calibrated P(knows) = {p:.3f}** → {note}\n\n"
+    out += f"Model answer: {ans!r}" + _match_md(ans, gold)
     return out
 
 
@@ -194,11 +266,16 @@ def build_ui():
                 mlp = gr.Plot(label="Signal B")
             gr.Markdown("### Verify")
             gold = gr.Textbox(label="Optional gold answer(s), pipe-separated", placeholder="Jane Austen | Austen")
-            gen_btn = gr.Button("Generate actual answer")
+            with gr.Row():
+                gen_btn = gr.Button("Generate - baseline", variant="primary")
+                gen_prompt_btn = gr.Button("Generate - prompt method")
+                gen_thought_btn = gr.Button("Generate - thought method")
             gen_out = gr.Markdown()
 
             btn.click(probe, inputs=q, outputs=[gauge, cryst, mlp, forming, verdict])
             gen_btn.click(generate_answer, inputs=[q, gold], outputs=gen_out)
+            gen_prompt_btn.click(generate_prompt_method, inputs=[q, gold], outputs=gen_out)
+            gen_thought_btn.click(generate_thought_method, inputs=[q, gold], outputs=gen_out)
         with gr.Tab("Evaluation"):
             md, test_img, cross_img = _load_metrics_md()
             gr.Markdown(md)

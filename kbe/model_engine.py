@@ -230,16 +230,21 @@ class Engine:
         return logits.float()
 
     # -------------------------------------------------------------- prompt
-    def format_prompt(self, question: str, add_instruction: bool = True) -> str:
+    def format_prompt(self, question: str, add_instruction: bool = True,
+                      system_prompt: str | None = None,
+                      enable_thinking: bool | None = None) -> str:
         text = question.strip()
         if add_instruction and self.answer_instruction:
             text = text + self.answer_instruction
-        msgs = [{"role": "user", "content": text}]
+        msgs = []
+        if system_prompt:
+            msgs.append({"role": "system", "content": system_prompt})
+        msgs.append({"role": "user", "content": text})
         return self.tokenizer.apply_chat_template(
             msgs,
             tokenize=False,
             add_generation_prompt=True,
-            enable_thinking=self.enable_thinking,
+            enable_thinking=self.enable_thinking if enable_thinking is None else enable_thinking,
         )
 
     @staticmethod
@@ -339,13 +344,21 @@ class Engine:
         return cap
 
     # ------------------------------------------------------------ generate
+    @staticmethod
+    def _first_line(text: str) -> str:
+        for line in text.splitlines():
+            if line.strip():
+                return line.strip()
+        return text.strip()
+
     @torch.no_grad()
     def generate_answer(self, question: str, max_new_tokens: int | None = None,
-                        do_sample: bool = False, temperature: float = 0.7) -> str:
+                        do_sample: bool = False, temperature: float = 0.7,
+                        system_prompt: str | None = None) -> str:
         gcfg = self.cfg.get("generation", {})
         max_new = max_new_tokens or gcfg.get("max_new_tokens", 32)
         stop_ids = gcfg.get("stop_token_ids", [1, 106])
-        text = self.format_prompt(question)
+        text = self.format_prompt(question, system_prompt=system_prompt)
         enc = self.tokenizer(text, return_tensors="pt", add_special_tokens=False).to(self.device)
         out = self.model.generate(
             **enc,
@@ -357,8 +370,35 @@ class Engine:
         )
         new_tokens = out[0, enc["input_ids"].shape[1]:]
         raw = self.tokenizer.decode(new_tokens, skip_special_tokens=False)
-        cleaned = self.strip_thinking(raw)
-        for line in cleaned.splitlines():
-            if line.strip():
-                return line.strip()
-        return cleaned.strip()
+        return self._first_line(self.strip_thinking(raw))
+
+    @torch.no_grad()
+    def generate_answer_seeded(self, question: str, seed_thought: str,
+                               max_new_tokens: int | None = None,
+                               do_sample: bool = False, temperature: float = 0.7) -> str:
+        """Thought method: enable thinking and prefill the open thought channel with ``seed_thought``,
+        then generate. The model continues the seeded thought, closes it with ``<channel|>``, and
+        emits the answer; we keep only the text after the channel-close.
+
+        Needs a generous token budget because the model must finish thinking *and* answer. The
+        seed's opening ``<|channel>`` lives in the prompt (not the decoded output), so we split on
+        the closing ``<channel|>`` ourselves rather than relying on ``strip_thinking``'s regex.
+        """
+        gcfg = self.cfg.get("generation", {})
+        max_new = max_new_tokens or gcfg.get("thinking_max_new_tokens", 256)
+        stop_ids = gcfg.get("stop_token_ids", [1, 106])
+        prompt = self.format_prompt(question, enable_thinking=True) + "<|channel>thought\n" + seed_thought.strip()
+        enc = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(self.device)
+        out = self.model.generate(
+            **enc,
+            max_new_tokens=max_new,
+            do_sample=do_sample,
+            temperature=temperature if do_sample else None,
+            eos_token_id=stop_ids,
+            pad_token_id=self.tokenizer.pad_token_id or 0,
+        )
+        new_tokens = out[0, enc["input_ids"].shape[1]:]
+        raw = self.tokenizer.decode(new_tokens, skip_special_tokens=False)
+        if "<channel|>" not in raw:  # thought never closed within budget
+            return "(model did not finish its thought within the token budget)"
+        return self._first_line(self.strip_thinking(raw.split("<channel|>")[-1]))
