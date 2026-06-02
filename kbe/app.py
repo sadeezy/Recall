@@ -162,49 +162,55 @@ def _system_prompt_for(p):
     )
 
 
-def _seed_thought_for(p):
-    """Deterministic CoT seed. Below the calibrated red threshold -> admit low confidence;
-    at/above -> None (no seed, normal generation). Never mentions the probe or the number."""
-    if RED is not None and p < RED:
+def _seed_thought_for(p, threshold):
+    """Deterministic CoT seed. Below ``threshold`` -> admit low confidence; at/above -> None
+    (no seed, normal generation). Never mentions the probe or the number."""
+    if p < threshold:
         return ("I don't think I have enough reliable knowledge in this area to answer the user "
                 "confidently. I should be honest about that uncertainty rather than guess.")
     return None
 
 
-def generate_answer(question, gold):
+def _gen_kwargs(temperature):
+    """Map the GUI temperature to generation kwargs: 0 -> greedy, >0 -> sampling at that temp."""
+    t = float(temperature or 0.0)
+    return {"do_sample": t > 0, "temperature": t} if t > 0 else {"do_sample": False}
+
+
+def generate_answer(question, gold, temperature):
     if not question or not question.strip():
         return "Enter a question first."
-    ans = ENG.generate_answer(question)
+    ans = ENG.generate_answer(question, **_gen_kwargs(temperature))
     return f"Model answer: {ans!r}" + _match_md(ans, gold)
 
 
-def generate_prompt_method(question, gold):
+def generate_prompt_method(question, gold, temperature):
     if not question or not question.strip():
         return "Enter a question first."
     p = _pknows(question)
     if p is None:
         return "Sidecar not trained yet — run `python -m kbe.sidecar` first."
     sys_prompt = _system_prompt_for(p)
-    ans = ENG.generate_answer(question, system_prompt=sys_prompt)
+    ans = ENG.generate_answer(question, system_prompt=sys_prompt, **_gen_kwargs(temperature))
     out = f"**Calibrated P(knows) = {p:.3f}** → injected into system prompt.\n\n"
     out += f"Model answer: {ans!r}" + _match_md(ans, gold)
     out += f"\n\n<details><summary>System prompt</summary>\n\n{sys_prompt}\n\n</details>"
     return out
 
 
-def generate_thought_method(question, gold):
+def generate_thought_method(question, gold, temperature, threshold):
     if not question or not question.strip():
         return "Enter a question first."
     p = _pknows(question)
     if p is None:
         return "Sidecar not trained yet — run `python -m kbe.sidecar` first."
-    seed = _seed_thought_for(p)
+    seed = _seed_thought_for(p, threshold)
     if seed is None:
-        ans = ENG.generate_answer(question)
-        note = f"P(knows) ≥ red ({RED:.3f}) → no seed (normal generation)."
+        ans = ENG.generate_answer(question, **_gen_kwargs(temperature))
+        note = f"P(knows) ≥ threshold ({threshold:.3f}) → no seed (normal generation)."
     else:
-        ans = ENG.generate_answer_seeded(question, seed)
-        note = f"P(knows) < red ({RED:.3f}) → seeded thought: {seed!r}"
+        ans = ENG.generate_answer_seeded(question, seed, **_gen_kwargs(temperature))
+        note = f"P(knows) < threshold ({threshold:.3f}) → seeded thought: {seed!r}"
     out = f"**Calibrated P(knows) = {p:.3f}** → {note}\n\n"
     out += f"Model answer: {ans!r}" + _match_md(ans, gold)
     return out
@@ -267,15 +273,19 @@ def build_ui():
             gr.Markdown("### Verify")
             gold = gr.Textbox(label="Optional gold answer(s), pipe-separated", placeholder="Jane Austen | Austen")
             with gr.Row():
+                temp = gr.Slider(0.0, 2.0, value=0.0, step=0.05, label="Temperature (0 = greedy)")
+                thr = gr.Slider(0.0, 1.0, value=RED if RED is not None else 0.5, step=0.01,
+                                label="Uncertain threshold (thought method)")
+            with gr.Row():
                 gen_btn = gr.Button("Generate - baseline", variant="primary")
                 gen_prompt_btn = gr.Button("Generate - prompt method")
                 gen_thought_btn = gr.Button("Generate - thought method")
             gen_out = gr.Markdown()
 
             btn.click(probe, inputs=q, outputs=[gauge, cryst, mlp, forming, verdict])
-            gen_btn.click(generate_answer, inputs=[q, gold], outputs=gen_out)
-            gen_prompt_btn.click(generate_prompt_method, inputs=[q, gold], outputs=gen_out)
-            gen_thought_btn.click(generate_thought_method, inputs=[q, gold], outputs=gen_out)
+            gen_btn.click(generate_answer, inputs=[q, gold, temp], outputs=gen_out)
+            gen_prompt_btn.click(generate_prompt_method, inputs=[q, gold, temp], outputs=gen_out)
+            gen_thought_btn.click(generate_thought_method, inputs=[q, gold, temp, thr], outputs=gen_out)
         with gr.Tab("Evaluation"):
             md, test_img, cross_img = _load_metrics_md()
             gr.Markdown(md)
