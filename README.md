@@ -50,22 +50,56 @@ The sidecar is a small GRU over depth (`[L, F]` → mean+last pool) concatenated
 
 ## Setup
 
-This project **reuses the existing system Python 3.12 environment**. The only missing dependency is
-`plotly`:
+Tested on **Python 3.12, Apple Silicon (MPS)**. From a fresh clone:
 
 ```bash
-pip install --user plotly
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-`requirements.txt` lists the full set with the versions present at build time, for reproducibility.
+`requirements.txt` pins the versions used to produce the shipped artifacts, for reproducibility.
 
-You also need access to the gated `google/gemma-4-E4B-it` checkpoint:
+**Gemma weights (needed only for the live model — see Quick start below).** `google/gemma-4-E4B-it`
+is gated: request access on its [Hugging Face model page](https://huggingface.co/google/gemma-4-E4B-it)
+(this accepts Google's Gemma license), then authenticate once:
 
 ```bash
-huggingface-cli login        # once, with a token that has access to the Gemma 4 weights
+huggingface-cli login          # use a token that has access to the Gemma 4 weights
+# optional — pre-pull the ~15 GB bf16 checkpoint so the first run isn't a surprise:
+huggingface-cli download google/gemma-4-E4B-it
 ```
 
-The ~15 GB bf16 checkpoint is loaded once and runs on MPS.
+The checkpoint is loaded once and runs bf16 on MPS. If it isn't accessible, the engine raises a
+clear auth error telling you to log in (see `model_engine.py`).
+
+---
+
+## Quick start
+
+The trained sidecar and the precomputed features/metrics **ship in this repo**, so you don't have
+to rebuild anything. Two paths need no model download; only live probing does.
+
+1. **Use the pretrained sidecar (default).** With the Gemma weights set up (above), launch the GUI:
+
+   ```bash
+   python -m kbe.app
+   ```
+
+   The Probe and thought-seed buttons run the live model (one forward pass per question); the
+   Evaluation tab shows the shipped metrics and figures. The green/red thresholds in
+   `config.yaml` already match the shipped `ckpts/lrd.pt` — no training step required.
+
+2. **Reproduce the evaluation offline (no model download).** Because `data/feats.npz` ships with
+   the extracted features, you can regenerate metrics + figures, and even retrain the sidecar,
+   with just torch + scikit-learn:
+
+   ```bash
+   python -m kbe.evaluate          # rewrites data/metrics.json + data/figs/ from shipped features
+   python -m kbe.sidecar           # optional: retrain ckpts/lrd.pt + thresholds from shipped features
+   ```
+
+3. **Rebuild everything from scratch.** This is the only path that needs the gated LLM (it extracts
+   activations and self-labels ~3000 examples, ~2–3 h on Apple Silicon). See **Run order** below.
 
 ---
 
@@ -133,8 +167,8 @@ kbe/
   sidecar.py         LRD GRU estimator + logistic baselines + calibration + thresholds
   evaluate.py        metrics, reliability / risk-coverage figures, baseline comparison
   app.py             Gradio + Plotly GUI
-data/                datasets, features, splits, figures, metrics (gitignored)
-ckpts/               trained sidecar + baselines (gitignored)
+data/                datasets, features, splits, figures, metrics (precomputed set committed; logs + resume checkpoints gitignored)
+ckpts/               trained sidecar + baselines (committed, so you can use them without retraining)
 ```
 
 ---
@@ -149,3 +183,11 @@ ckpts/               trained sidecar + baselines (gitignored)
   GUI's "what's forming" table uses the Signal-A hidden-state lens, which is well-behaved.
 - The first model forward after load is warmed up internally to avoid an MPS first-pass logit
   artifact.
+
+---
+
+## License
+
+The code in this repository is released under the [MIT License](LICENSE). The Gemma model weights
+are **not** part of this repository and are governed by Google's separate
+[Gemma license](https://ai.google.dev/gemma/terms), which you must accept to download them.

@@ -1,6 +1,18 @@
-data/
-ckpts/
+# Python
 __pycache__/
-.venv/
 *.pyc
+.venv/
 .DS_Store
+
+# Pipeline run artifacts — regenerated, not published
+data/*.log
+data/build_ckpt.npz
+data/build_ckpt.npz.tmp.npz
+data/run_config.yaml
+data/figs/m2_sanity.png
+
+# NOTE: ckpts/ (trained sidecar) and the data/ dataset+eval artifacts below ARE
+# committed on purpose for offline reproducibility — see README "Quick start":
+#   ckpts/lrd.pt, ckpts/baselines.joblib
+#   data/feats.npz, data/dataset.parquet, data/splits.json, data/metrics.json
+#   data/figs/eval_test.png, data/figs/eval_cross_popqa.png

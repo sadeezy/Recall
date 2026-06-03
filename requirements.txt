@@ -1,5 +1,6 @@
-# Reused from the existing system Python 3.12 environment (see README).
-# Versions present at build time are noted for reproducibility.
+# Install into a fresh venv:  pip install -r requirements.txt
+# Tested on Python 3.12 (macOS / Apple Silicon, MPS). The version after each
+# package is the one used to produce the shipped artifacts (see README "Setup").
 torch>=2.4          # 2.8.0 (MPS build)
 transformers>=5.9   # must include Gemma4 support
 datasets>=4.0
