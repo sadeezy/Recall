@@ -41,7 +41,10 @@ The sidecar is a small GRU over depth (`[L, F]` → mean+last pool) concatenated
 - **Features are stored, never raw activations.** Each capture is detached → moved to CPU → cast to
   float16 → freed immediately.
 - Model dimensions are read from `model.config` at runtime (42 layers, hidden 2560, vocab 262144,
-  softcap 30.0 for this checkpoint) — nothing is hardcoded. Thinking mode is **off**.
+  131072-token native context, softcap 30.0 for this checkpoint) — nothing is hardcoded. Thinking mode is **off** for the
+  prompt-only capture and the self-behavioral labeling, so features and labels match the
+  no-thinking generation the sidecar predicts; the GUI's interactive generate buttons are the one
+  exception (they enable it for the head-to-head answer comparison).
 
 ---
 
@@ -105,9 +108,12 @@ and writes its outputs under `data/` and `ckpts/`.
   - **Probe**: type a question → calibrated P(knows) gauge with a green/amber/red verdict, the
     Signal-A crystallization trajectory, the Signal-B MLP recall-write chart (strongest layer
     highlighted), and a "what's forming" logit-lens table. Two **generate** buttons then check the
-    actual answer (optionally matched against pipe-separated gold answers):
-    - **baseline** — plain greedy generation, with no confidence signal injected.
-    - **thought seed** — feeds the model its *own* calibrated P(knows) back into an open thinking
+    actual answer (optionally matched against pipe-separated gold answers). For a fair head-to-head,
+    both run with the model's **thinking channel enabled** and the **same generation budget** — it
+    generates until the model stops, bounded by the configured context window (`model.context_window`
+    in `config.yaml`, 4096 by default; ≤ the model's native 131072) — so the sole difference is the seed:
+    - **baseline** — thinks and answers with no confidence signal injected.
+    - **thought seed** — feeds the model its *own* calibrated P(knows) back into the open thinking
       channel. The seed states the probability as a percent and, graded by adjustable low/high band
       cutoffs (default 0.4 / 0.7), directs the model to either answer confidently, lead with a hedge,
       or admit it doesn't know; the model then finishes the seeded thought and emits its answer.

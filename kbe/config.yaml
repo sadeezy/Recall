@@ -4,6 +4,7 @@ model:
   device: mps
   attn_implementation: eager
   drop_multimodal_towers: true
+  context_window: 4096   # cap on prompt+generation tokens; <= model's native 131072. null -> native
 prompt:
   enable_thinking: false
   answer_instruction: ' Answer concisely with just the answer.'

@@ -139,11 +139,17 @@ def _pknows(question):
     return lrd_prob_one(LRD, fs.feats, fs.globals)
 
 
+def _answer_md(ans):
+    """Render the model answer for the Markdown output. A fenced block preserves line breaks so
+    multi-line answers show in full (a bare Markdown paragraph would collapse single newlines)."""
+    return "**Model answer:**\n\n```text\n" + (ans if ans.strip() else "(empty answer)") + "\n```"
+
+
 def _match_md(ans, gold):
     if gold and gold.strip():
         from kbe.build_dataset import is_match
         ok = is_match(ans, [g.strip() for g in gold.split("|")])
-        return f"\nMatch vs gold: {'✓ correct' if ok else '✗ incorrect'}"
+        return f"\n\n**Match vs gold:** {'✓ correct' if ok else '✗ incorrect'}"
     return ""
 
 
@@ -170,8 +176,8 @@ def _seed_thought_pct(p, low, high):
 def generate_answer(question, gold):
     if not question or not question.strip():
         return "Enter a question first."
-    ans = ENG.generate_answer(question)
-    return f"Model answer: {ans!r}" + _match_md(ans, gold)
+    ans = ENG.generate_answer(question, enable_thinking=True, max_new_tokens=ENG.max_context)
+    return _answer_md(ans) + _match_md(ans, gold)
 
 
 def generate_thought_seed(question, gold, low, high):
@@ -181,9 +187,9 @@ def generate_thought_seed(question, gold, low, high):
     if p is None:
         return "Sidecar not trained yet — run `python -m kbe.sidecar` first."
     seed = _seed_thought_pct(p, low, high)
-    ans = ENG.generate_answer_seeded(question, seed)
+    ans = ENG.generate_answer_seeded(question, seed, max_new_tokens=ENG.max_context)
     out = f"**Calibrated P(knows) = {p:.3f}** → always-seeded (percent template): {seed!r}\n\n"
-    out += f"Model answer: {ans!r}" + _match_md(ans, gold)
+    out += _answer_md(ans) + _match_md(ans, gold)
     return out
 
 

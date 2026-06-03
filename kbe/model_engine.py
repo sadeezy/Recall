@@ -116,6 +116,7 @@ class Engine:
         self.dtype = getattr(torch, mcfg.get("dtype", "bfloat16"))
         self.attn_impl = mcfg.get("attn_implementation", "eager")
         self.drop_towers = mcfg.get("drop_multimodal_towers", True)
+        self.context_window = mcfg.get("context_window")  # optional cap; falls back to model native
         self.enable_thinking = cfg.get("prompt", {}).get("enable_thinking", False)
         self.answer_instruction = cfg.get("prompt", {}).get("answer_instruction", "")
 
@@ -127,6 +128,7 @@ class Engine:
         self.num_layers = None
         self.hidden_size = None
         self.vocab_size = None
+        self.max_context = None
 
     # ----------------------------------------------------------------- load
     def load(self) -> "Engine":
@@ -155,6 +157,10 @@ class Engine:
         self.hidden_size = tcfg.hidden_size
         self.vocab_size = tcfg.vocab_size
         self.softcap = getattr(tcfg, "final_logit_softcapping", None)
+        model_ctx = getattr(tcfg, "max_position_embeddings", 8192)
+        # Honour an explicit context_window from config (bounds the GUI generate budget); never
+        # exceed what the model actually supports.
+        self.max_context = min(self.context_window, model_ctx) if self.context_window else model_ctx
 
         if self.drop_towers:
             self._drop_multimodal_towers(model)
@@ -351,18 +357,38 @@ class Engine:
                 return line.strip()
         return text.strip()
 
+    def _answer_after_thought(self, raw: str) -> str:
+        """Extract the post-thinking answer from a decoded generation. With thinking enabled the
+        answer follows the thought's closing ``<channel|>`` (the opening ``<|channel>`` is supplied
+        by the chat template / seed and so isn't in the decoded output). Split on the close when it's
+        present; otherwise fall back to the regex strip (model answered without a closed thought).
+
+        Returns the full answer with line breaks preserved (only outer whitespace trimmed) — the
+        caller gets the complete multi-line response, not just its first line."""
+        if "<channel|>" in raw:
+            raw = raw.split("<channel|>")[-1]
+        return self.strip_thinking(raw)
+
+    def _ctx_budget(self, prompt_len: int, requested: int) -> int:
+        """Clamp a requested ``max_new_tokens`` so prompt+new never exceeds the context window. The
+        GUI passes ``max_context`` to mean "no limit" — this turns that into "fill the remaining
+        context", letting generation stop at EOS rather than at an arbitrary token cap."""
+        return max(min(requested, self.max_context - prompt_len), 1)
+
     @torch.no_grad()
     def generate_answer(self, question: str, max_new_tokens: int | None = None,
                         do_sample: bool = False, temperature: float = 0.7,
-                        system_prompt: str | None = None) -> str:
+                        system_prompt: str | None = None,
+                        enable_thinking: bool | None = None) -> str:
         gcfg = self.cfg.get("generation", {})
+        thinking = self.enable_thinking if enable_thinking is None else enable_thinking
         max_new = max_new_tokens or gcfg.get("max_new_tokens", 32)
         stop_ids = gcfg.get("stop_token_ids", [1, 106])
-        text = self.format_prompt(question, system_prompt=system_prompt)
+        text = self.format_prompt(question, system_prompt=system_prompt, enable_thinking=enable_thinking)
         enc = self.tokenizer(text, return_tensors="pt", add_special_tokens=False).to(self.device)
         out = self.model.generate(
             **enc,
-            max_new_tokens=max_new,
+            max_new_tokens=self._ctx_budget(enc["input_ids"].shape[1], max_new),
             do_sample=do_sample,
             temperature=temperature if do_sample else None,
             eos_token_id=stop_ids,
@@ -370,7 +396,7 @@ class Engine:
         )
         new_tokens = out[0, enc["input_ids"].shape[1]:]
         raw = self.tokenizer.decode(new_tokens, skip_special_tokens=False)
-        return self._first_line(self.strip_thinking(raw))
+        return self._answer_after_thought(raw) if thinking else self._first_line(self.strip_thinking(raw))
 
     @torch.no_grad()
     def generate_answer_seeded(self, question: str, seed_thought: str,
@@ -380,9 +406,10 @@ class Engine:
         then generate. The model continues the seeded thought, closes it with ``<channel|>``, and
         emits the answer; we keep only the text after the channel-close.
 
-        Needs a generous token budget because the model must finish thinking *and* answer. The
-        seed's opening ``<|channel>`` lives in the prompt (not the decoded output), so we split on
-        the closing ``<channel|>`` ourselves rather than relying on ``strip_thinking``'s regex.
+        The budget defaults to filling the context window (``_ctx_budget``) so the model can finish
+        thinking *and* answer without truncation. The seed's opening ``<|channel>`` lives in the
+        prompt, so the close-tag split in ``_answer_after_thought`` (not ``strip_thinking``'s regex)
+        is what recovers the answer.
         """
         gcfg = self.cfg.get("generation", {})
         max_new = max_new_tokens or gcfg.get("thinking_max_new_tokens", 256)
@@ -391,7 +418,7 @@ class Engine:
         enc = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(self.device)
         out = self.model.generate(
             **enc,
-            max_new_tokens=max_new,
+            max_new_tokens=self._ctx_budget(enc["input_ids"].shape[1], max_new),
             do_sample=do_sample,
             temperature=temperature if do_sample else None,
             eos_token_id=stop_ids,
@@ -399,6 +426,4 @@ class Engine:
         )
         new_tokens = out[0, enc["input_ids"].shape[1]:]
         raw = self.tokenizer.decode(new_tokens, skip_special_tokens=False)
-        if "<channel|>" not in raw:  # thought never closed within budget
-            return "(model did not finish its thought within the token budget)"
-        return self._first_line(self.strip_thinking(raw.split("<channel|>")[-1]))
+        return self._answer_after_thought(raw)
