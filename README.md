@@ -104,8 +104,13 @@ and writes its outputs under `data/` and `ckpts/`.
 - **`app`** (Gradio + Plotly) — three tabs:
   - **Probe**: type a question → calibrated P(knows) gauge with a green/amber/red verdict, the
     Signal-A crystallization trajectory, the Signal-B MLP recall-write chart (strongest layer
-    highlighted), a "what's forming" logit-lens table, and an optional "generate the actual answer"
-    check against a gold answer.
+    highlighted), and a "what's forming" logit-lens table. Two **generate** buttons then check the
+    actual answer (optionally matched against pipe-separated gold answers):
+    - **baseline** — plain greedy generation, with no confidence signal injected.
+    - **thought seed** — feeds the model its *own* calibrated P(knows) back into an open thinking
+      channel. The seed states the probability as a percent and, graded by adjustable low/high band
+      cutoffs (default 0.4 / 0.7), directs the model to either answer confidently, lead with a hedge,
+      or admit it doesn't know; the model then finishes the seeded thought and emits its answer.
   - **Evaluation**: the saved held-out / cross-dataset metrics and figures.
   - **Info**: resolved config, recall band, thresholds, and live memory.
 
@@ -116,7 +121,7 @@ and writes its outputs under `data/` and `ckpts/`.
 ```
 kbe/
   config.yaml        resolved run configuration (model, band, flags, thresholds)
-  model_engine.py    Engine: load on MPS, prompt-only capture with MLP-write hooks, logit lens, generate
+  model_engine.py    Engine: load on MPS, prompt-only capture with MLP-write hooks, logit lens, generate (baseline + thought-seeded)
   features.py        Signals A & B → per-layer feature matrix [L,F] + global scalars
   build_dataset.py   capture features + self-behavioral labels for PopQA + TriviaQA
   sidecar.py         LRD GRU estimator + logistic baselines + calibration + thresholds
