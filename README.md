@@ -11,6 +11,18 @@ The label is the model's **own behavior**: `knows = 1` iff *this exact bf16 inst
 question correctly (matched against gold answers + aliases). Activations and labels come from the
 **same** model instance — so the estimator predicts what the model will actually do, not world-truth.
 
+![Recall architecture](Recall_architecture.png)
+
+### Examples
+
+```text
+Question: Who wrote The Left Hand of Darkness?
+Recall: P(knows) = 0.91 ✅ likely known
+
+Question: What is the capital of a fictional country?
+Recall: P(knows) = 0.08 ❌ likely unknown
+```
+
 ---
 
 ## Method — three signal families → a small sidecar
