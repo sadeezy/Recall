@@ -84,7 +84,7 @@ def _auroc(y, score):
 def train_lrd(data, splits, cfg):
     tcfg = cfg["train"]
     set_seed(tcfg["seed"])
-    device = pick_device(tcfg.get("device", "mps"))
+    device = pick_device(tcfg.get("device", "auto"))
     tr, va = splits["main"]["train"], splits["main"]["val"]
 
     fscaler = _PerFeatScaler().fit(data["feats"][tr])
@@ -167,7 +167,7 @@ def _fit_temperature(logits: torch.Tensor, y: torch.Tensor) -> float:
 
 def load_lrd_model(cfg: dict) -> dict:
     """Rebuild a trained LRD model (net + scalers + temperature) from ckpts/lrd.pt."""
-    device = pick_device(cfg["train"].get("device", "mps"))
+    device = pick_device(cfg["train"].get("device", "auto"))
     ck = torch.load(os.path.join(cfg["paths"]["ckpt_dir"], "lrd.pt"), map_location=device, weights_only=False)
     net = LRDNet(ck["n_feat"], ck["n_global"], ck["hidden"]).to(device)
     net.load_state_dict(ck["state_dict"])

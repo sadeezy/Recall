@@ -1,7 +1,7 @@
 model:
   id: google/gemma-4-E4B-it
   dtype: bfloat16
-  device: mps
+  device: auto   # auto-detect: CUDA > MPS > CPU (also accepts explicit cuda / mps / cpu)
   attn_implementation: eager
   drop_multimodal_towers: true
   context_window: 4096   # cap on prompt+generation tokens; <= model's native 131072. null -> native
@@ -47,7 +47,7 @@ train:
   weight_decay: 0.0001
   hidden: 96
   batch_size: 128
-  device: mps
+  device: auto   # auto-detect: CUDA > MPS > CPU
 thresholds:
   green: 0.8650747537612915
   red: 0.7741634845733643

@@ -1,7 +1,11 @@
 # Install into a fresh venv:  pip install -r requirements.txt
-# Tested on Python 3.12 (macOS / Apple Silicon, MPS). The version after each
-# package is the one used to produce the shipped artifacts (see README "Setup").
-torch>=2.4          # 2.8.0 (MPS build)
+# Runs on NVIDIA CUDA or Apple Silicon (MPS); the device is auto-detected (see config.yaml).
+# Tested on Python 3.12 (macOS / Apple Silicon, MPS); also verified on Linux + CUDA. The version
+# after each package is the one used to produce the shipped artifacts (see README "Setup").
+# torch: on Linux `pip install torch` already pulls a CUDA build; on macOS it is the MPS build.
+# For a specific CUDA toolchain use the PyTorch index, e.g.
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+torch>=2.4          # 2.8.0 (MPS build on macOS; CUDA build on Linux)
 transformers>=5.9   # must include Gemma4 support
 datasets>=4.0
 numpy>=2.0

@@ -21,7 +21,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 from kbe.features import extract_features, FEAT_NAMES
-from kbe.model_engine import Engine, load_config, _mps_alloc_gb, _resident_gb
+from kbe.model_engine import Engine, load_config, _gpu_alloc_gb, _resident_gb
 from kbe.sidecar import load_lrd_model, lrd_prob_one
 
 CFG = load_config()
@@ -227,7 +227,7 @@ def _info_md():
         f"**Recall band**: layers {BAND_LO}–{BAND_HI} "
         f"({CFG['recall_band']['lo_frac']}–{CFG['recall_band']['hi_frac']} of depth)  \n"
         f"**Thresholds**: green P≥{GREEN}, red P<{RED}  \n"
-        f"**Memory**: RSS {_resident_gb():.2f} GB, MPS alloc {_mps_alloc_gb():.2f} GB  \n\n"
+        f"**Memory**: RSS {_resident_gb():.2f} GB, {ENG.device} alloc {_gpu_alloc_gb():.2f} GB  \n\n"
         f"Labels are the model's *own* behavior (knows=1 iff this bf16 instance answers correctly). "
         f"Activations + labels come from the same instance; no quantization (bf16 throughout)."
     )

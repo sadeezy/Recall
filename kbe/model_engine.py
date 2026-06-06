@@ -59,11 +59,19 @@ _THOUGHT_RE = re.compile(r"<\|channel>.*?<channel\|>", re.DOTALL)
 _SPECIAL_RE = re.compile(r"<\|?(?:turn|think|channel|tool[^>]*)\|?>|<turn\|>|<channel\|>")
 
 
-def pick_device(requested: str = "mps") -> str:
-    if requested == "mps" and torch.backends.mps.is_available():
-        return "mps"
-    if requested == "cuda" and torch.cuda.is_available():
+def _mps_available() -> bool:
+    backend = getattr(torch.backends, "mps", None)
+    return bool(backend) and backend.is_available()
+
+
+def pick_device(requested: str = "auto") -> str:
+    """Resolve a device string. ``auto`` prefers CUDA, then MPS, then CPU. An explicit
+    ``cuda``/``mps`` request is honoured when available and otherwise falls back to CPU."""
+    req = (requested or "auto").lower()
+    if req in ("auto", "cuda") and torch.cuda.is_available():
         return "cuda"
+    if req in ("auto", "mps") and _mps_available():
+        return "mps"
     return "cpu"
 
 
@@ -76,11 +84,20 @@ def _resident_gb() -> float:
         return float("nan")
 
 
-def _mps_alloc_gb() -> float:
+def _gpu_alloc_gb() -> float:
+    """Currently-allocated accelerator memory in GB (CUDA or MPS), or NaN on CPU/error."""
     try:
-        return torch.mps.current_allocated_memory() / 1e9
+        if torch.cuda.is_available():
+            return torch.cuda.memory_allocated() / 1e9
+        if _mps_available():
+            return torch.mps.current_allocated_memory() / 1e9
     except Exception:
-        return float("nan")
+        pass
+    return float("nan")
+
+
+def _mps_alloc_gb() -> float:  # backward-compatible alias; now device-aware
+    return _gpu_alloc_gb()
 
 
 @dataclass
@@ -112,7 +129,7 @@ class Engine:
         self.cfg = cfg
         mcfg = cfg["model"]
         self.model_id = mcfg["id"]
-        self.device = pick_device(mcfg.get("device", "mps"))
+        self.device = pick_device(mcfg.get("device", "auto"))
         self.dtype = getattr(torch, mcfg.get("dtype", "bfloat16"))
         self.attn_impl = mcfg.get("attn_implementation", "eager")
         self.drop_towers = mcfg.get("drop_multimodal_towers", True)
@@ -218,7 +235,7 @@ class Engine:
             f"[Engine] hidden_size_per_layer_input={getattr(tcfg, 'hidden_size_per_layer_input', '?')} "
             f"final_logit_softcapping={self.softcap}"
         )
-        print(f"[Engine] resident RSS={_resident_gb():.2f} GB  MPS alloc={_mps_alloc_gb():.2f} GB")
+        print(f"[Engine] resident RSS={_resident_gb():.2f} GB  {self.device} alloc={_gpu_alloc_gb():.2f} GB")
 
     # ----------------------------------------------------------------- lens
     def lens_logits(self, h: torch.Tensor) -> torch.Tensor:

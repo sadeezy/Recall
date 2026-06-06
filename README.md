@@ -46,8 +46,11 @@ The sidecar is a small GRU over depth (`[L, F]` → mean+last pool) concatenated
 
 ## Hard constraints (by design)
 
-- **Apple Silicon / MPS only.** No CUDA assumptions anywhere. Peak memory stays under ~24 GB.
-- **bf16 throughout** (`attn_implementation="eager"`, `PYTORCH_ENABLE_MPS_FALLBACK=1`). Not fp16.
+- **GPU-portable: NVIDIA CUDA or Apple Silicon / MPS.** The device is auto-detected (CUDA > MPS >
+  CPU; override with `model.device` / `train.device` in `config.yaml`). Peak memory stays under
+  ~24 GB, so a single 24 GB GPU (e.g. an NVIDIA A10) or an Apple Silicon Mac is enough.
+- **bf16 throughout** (`attn_implementation="eager"`; `PYTORCH_ENABLE_MPS_FALLBACK=1` is set for the
+  MPS path and is a no-op on CUDA). Not fp16.
 - **No GGUF / llama.cpp / Ollama.** Activations *and* labels must come from one bf16 instance, so a
   quantized runtime is never used for extraction or labeling.
 - **Features are stored, never raw activations.** Each capture is detached → moved to CPU → cast to
@@ -62,11 +65,15 @@ The sidecar is a small GRU over depth (`[L, F]` → mean+last pool) concatenated
 
 ## Setup
 
-Tested on **Python 3.12, Apple Silicon (MPS)**. From a fresh clone:
+Tested on **Python 3.12, Apple Silicon (MPS)**, and on **Linux + NVIDIA CUDA** (e.g. an A10). From a
+fresh clone:
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+# On Linux, `pip install torch` already installs a CUDA build. To target a specific CUDA
+# toolchain, install torch from the matching PyTorch index, e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
 ```
 
 `requirements.txt` pins the versions used to produce the shipped artifacts, for reproducibility.
@@ -81,8 +88,8 @@ huggingface-cli login          # use a token that has access to the Gemma 4 weig
 huggingface-cli download google/gemma-4-E4B-it
 ```
 
-The checkpoint is loaded once and runs bf16 on MPS. If it isn't accessible, the engine raises a
-clear auth error telling you to log in (see `model_engine.py`).
+The checkpoint is loaded once and runs bf16 on the detected accelerator (CUDA or MPS). If it isn't
+accessible, the engine raises a clear auth error telling you to log in (see `model_engine.py`).
 
 ---
 
