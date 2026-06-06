@@ -44,6 +44,39 @@ The sidecar is a small GRU over depth (`[L, F]` → mean+last pool) concatenated
 
 ---
 
+## Evaluation
+
+The Evaluation tab reads `data/metrics.json` for AUROC / AUPRC / ECE and the PopQA
+popularity-sliced table, then displays the two committed figures below. In each figure, the left
+panel is LRD reliability — predicted `P(knows)` versus empirical accuracy — and the right panel is
+risk–coverage across LRD and the baselines.
+
+![Held-out test reliability and risk-coverage](data/figs/eval_test.png)
+
+![Cross-dataset PopQA reliability and risk-coverage](data/figs/eval_cross_popqa.png)
+
+| split | model | AUROC | AUPRC | ECE |
+|---|---|---|---|---|
+| test | LRD | 0.8983 | 0.7937 | 0.0925 |
+| test | last-layer probe | 0.8189 | 0.6571 | 0.1807 |
+| test | global logreg | 0.8665 | 0.7477 | 0.1161 |
+| test | neg-entropy (trivial) | 0.8529 | 0.7269 | nan |
+| cross | LRD | 0.9411 | 0.7629 | 0.0679 |
+| cross | last-layer probe | 0.9612 | 0.8875 | 0.0327 |
+| cross | global logreg | 0.8748 | 0.5913 | 0.1494 |
+| cross | neg-entropy (trivial) | 0.8611 | 0.5903 | nan |
+
+**PopQA popularity-sliced AUROC (LRD)**
+
+| bucket | n | AUROC | label rate |
+|---|---|---|---|
+| bucket_0 | 56 | 0.9279 | 0.071 |
+| bucket_1 | 56 | 0.9623 | 0.054 |
+| bucket_2 | 56 | 0.9200 | 0.107 |
+| bucket_3 | 57 | 0.8432 | 0.351 |
+
+---
+
 ## Hard constraints (by design)
 
 - **GPU-portable: NVIDIA CUDA or Apple Silicon / MPS.** The device is auto-detected (CUDA > MPS >
